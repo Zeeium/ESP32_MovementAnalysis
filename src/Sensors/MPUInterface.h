@@ -23,6 +23,7 @@ public:
     MPUInterface();
     bool begin();
     bool readSample(SensorSample& sample);
+    bool readEvents(sensors_event_t& accel, sensors_event_t& gyro, sensors_event_t& temp);
 
 private:
     Adafruit_MPU6050 _mpu;

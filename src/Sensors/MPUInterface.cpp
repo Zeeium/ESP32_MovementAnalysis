@@ -41,4 +41,8 @@ bool MPUInterface::readSample(SensorSample& sample) {
     return true;
 }
 
+bool MPUInterface::readEvents(sensors_event_t& accel, sensors_event_t& gyro, sensors_event_t& temp) {
+    return _mpu.getEvent(&accel, &gyro, &temp);
+}
+
 } // namespace Sensors

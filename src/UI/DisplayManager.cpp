@@ -66,7 +66,6 @@ void DisplayManager::showMonitoring(const MotionFeatures& features,
         case RESTING:             stateColor = COLOR_GREEN;  stateStr = "RESTING"; break;
         case NORMAL_MOVEMENT:     stateColor = COLOR_CYAN;   stateStr = "MOVING"; break;
         case REPETITIVE_MOVEMENT: stateColor = COLOR_YELLOW; stateStr = "REPETITIVE"; break;
-        case IMPACT_EVENT:        stateColor = COLOR_RED;    stateStr = "IMPACT!"; break;
         default:                  stateColor = COLOR_DIM;    stateStr = "---"; break;
     }
     drawHeader(stateStr, stateColor);

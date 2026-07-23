@@ -71,15 +71,7 @@ void MotionEngine::addSample(SensorSample& sample) {
     // 4. Update complementary orientation filter
     _filter.update(sample, dt);
 
-    // 5. Check for raw impact spikes (> 3.0g) to trigger state machine instantly
-    float accelMag = sqrt(sample.accelX * sample.accelX + 
-                          sample.accelY * sample.accelY + 
-                          sample.accelZ * sample.accelZ) / GRAVITY_MSS;
-    if (accelMag > 3.0f && _state != CALIBRATING) {
-        _state = IMPACT_EVENT;
-    }
-
-    // 6. Accumulate sample in current window
+    // 5. Accumulate sample in current window
     if (_window.count < SAMPLE_COUNT) {
         if (_window.count == 0) {
             _window.startTime = sample.timestamp;
@@ -224,15 +216,13 @@ MotionFeatures MotionEngine::extract() {
     // Reset window buffer count
     _window.count = 0;
 
-    // 8. State Machine Transitions based on window features (unless currently IMPACT_EVENT)
-    if (_state != IMPACT_EVENT) {
-        if (f.gyroRMS < 0.10f) {
-            _state = RESTING;
-        } else if (f.normalizedAutocorrelationPeak > 0.50f) {
-            _state = REPETITIVE_MOVEMENT;
-        } else {
-            _state = NORMAL_MOVEMENT;
-        }
+    // 8. State Machine Transitions based on window features
+    if (f.gyroRMS < 0.10f) {
+        _state = RESTING;
+    } else if (f.normalizedAutocorrelationPeak > 0.35f && f.gyroRMS > 0.15f) {
+        _state = REPETITIVE_MOVEMENT;
+    } else {
+        _state = NORMAL_MOVEMENT;
     }
 
     return f;
@@ -263,9 +253,9 @@ float MotionEngine::calculateAutocorrelationPeak(const float* signal, uint16_t s
         return 0.0f;
     }
 
-    // 4. Find peak in lag range [14, 33] (corresponding to 3-7 Hz at 100Hz)
+    // 4. Find peak in lag range [12, 50] (corresponding to ~2-8 Hz at 100Hz)
     float maxRN = -1.0f;
-    for (uint16_t k = 14; k <= 33; k++) {
+    for (uint16_t k = 12; k <= 50; k++) {
         float rk = 0.0f;
         for (uint16_t t = 0; t < size - k; t++) {
             rk += ac[t] * ac[t + k];

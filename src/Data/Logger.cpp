@@ -22,7 +22,6 @@ void Logger::logFeatures(const MotionFeatures& f, MotionState state) {
         case RESTING:              stateStr = "RESTING"; break;
         case NORMAL_MOVEMENT:      stateStr = "NORMAL_MOVEMENT"; break;
         case REPETITIVE_MOVEMENT:  stateStr = "REPETITIVE_MOVEMENT"; break;
-        case IMPACT_EVENT:         stateStr = "IMPACT_EVENT"; break;
         default:                   stateStr = "UNKNOWN"; break;
     }
 

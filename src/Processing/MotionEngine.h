@@ -11,8 +11,7 @@ enum MotionState {
     CALIBRATING,
     RESTING,
     NORMAL_MOVEMENT,
-    REPETITIVE_MOVEMENT,
-    IMPACT_EVENT
+    REPETITIVE_MOVEMENT
 };
 
 // Time-series window abstraction — consumed by FFT, autocorrelation, and statistics
