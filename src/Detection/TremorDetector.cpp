@@ -11,9 +11,7 @@ TremorResult TremorDetector::analyze(const MotionFeatures& f) {
     result.detected = false;
     result.confidence = 0.0f;
     result.severity = TremorResult::NONE;
-    result.dominantFrequency = 0.0f;
-    result.dominantAxis = f.dominantAxis;
-
+    
     // Find the axis with the highest tremor band energy
     int bestAxis = 0;
     float bestEnergy = f.tremorBandEnergy[0];
@@ -26,37 +24,49 @@ TremorResult TremorDetector::analyze(const MotionFeatures& f) {
     result.dominantAxis = bestAxis;
     result.dominantFrequency = f.dominantFrequency[bestAxis];
 
-    // Calculate confidence sub-scores
-    float freqScore   = scoreFrequencyMatch(f);       // max 30
-    float energyScore = scoreEnergyConcentration(f);   // max 25
-    float periodScore = scorePeriodicity(f);            // max 25
-    float axisScore   = scoreAxisStability(f);          // max 10
-    float ampScore    = scoreAmplitudeConsistency(f);   // max 10
+    // ==========================================
+    // ON-DEVICE MACHINE LEARNING ENGINE
+    // 2D Cluster Classification (Autocorr, Energy)
+    // ==========================================
+    
+    // We average the 3 tremor centroids to create one massive "Tremor Super-Cluster"
+    // REST: [0.3818, 0.1453]
+    // TREMOR: [0.5130, 0.8902] (Averaged from Mild, Mod, Severe)
+    
+    float tremorCentroid[2] = {0.5130f, 0.8902f};
 
-    result.confidence = freqScore + energyScore + periodScore + axisScore + ampScore;
+    float inputVec[2] = {
+        f.normalizedAutocorrelationPeak,
+        bestEnergy
+    };
 
-    // Clamp to [0, 100]
+    // Calculate Euclidean distance to TREMOR cluster safely
+    float dx = inputVec[0] - tremorCentroid[0];
+    float dy = inputVec[1] - tremorCentroid[1];
+    float distToTremor = sqrt((dx * dx) + (dy * dy));
+
+    // Map distance to confidence
+    // We map a distance of 0.85 (very far) to 0% confidence, and 0.0 to 100%
+    result.confidence = (1.0f - (distToTremor / 0.85f)) * 100.0f;
+    
+    // BOOST CONFIDENCE WITH PHYSICAL INTENSITY (GyroRMS)
+    // Because short tremors get mathematically diluted in a 5.12s window, 
+    // their 2D distance drops. We compensate by boosting confidence +20% for every 1.0 GyroRMS!
+    // Example: If base ML conf is 20%, but GyroRMS is 2.5, new conf = 20 + 50 = 70%!
+    result.confidence += (f.gyroRMS * 20.0f);
+    
+    // Clamp confidence
     if (result.confidence > 100.0f) result.confidence = 100.0f;
     if (result.confidence < 0.0f) result.confidence = 0.0f;
 
-    // Track sustained oscillation across consecutive windows
-    // Require at least ~3 seconds of sustained periodic activity
-    if (result.confidence > 40.0f) {
-        _sustainedWindowCount++;
-    } else {
-        _sustainedWindowCount = 0;
-    }
-
-    // At 256 samples / 100 Hz = 2.56s per window, ~2 windows = ~5 seconds
-    bool sustained = (_sustainedWindowCount >= 2);
-
-    // Classify severity based on confidence bands (only if sustained)
-    if (sustained && result.confidence >= 40.0f) {
+    // A tremor is detected if it has physical intensity AND resembles the tremor cluster
+    if (result.confidence >= 50.0f && f.gyroRMS >= 0.80f) { 
         result.detected = true;
-
-        if (result.confidence >= 75.0f) {
+        
+        // Use physical intensity (GyroRMS) to classify severity
+        if (f.gyroRMS >= 4.5f) {
             result.severity = TremorResult::SEVERE;
-        } else if (result.confidence >= 55.0f) {
+        } else if (f.gyroRMS >= 3.0f) {
             result.severity = TremorResult::MODERATE;
         } else {
             result.severity = TremorResult::MILD;
@@ -66,9 +76,19 @@ TremorResult TremorDetector::analyze(const MotionFeatures& f) {
         result.severity = TremorResult::NONE;
     }
 
-    // Track dominant axis for stability scoring
-    _lastDominantAxis = bestAxis;
+    // Require sustained oscillation (1 window)
+    if (result.detected) {
+        _sustainedWindowCount++;
+    } else {
+        _sustainedWindowCount = 0;
+    }
 
+    if (_sustainedWindowCount < 1) {
+        result.detected = false;
+        result.severity = TremorResult::NONE;
+    }
+
+    _lastDominantAxis = bestAxis;
     return result;
 }
 
@@ -111,22 +131,23 @@ float TremorDetector::scoreFrequencyMatch(const MotionFeatures& f) {
 
 float TremorDetector::scoreEnergyConcentration(const MotionFeatures& f) {
     // Max 25 points: how much energy is concentrated in the tremor band
+    // Experimental data showed tremors have 0.72+ energy in tremor band
     float bestRatio = 0.0f;
     for (int a = 0; a < 3; a++) {
         if (f.tremorBandEnergy[a] > bestRatio)
             bestRatio = f.tremorBandEnergy[a];
     }
 
-    // Scale: 0.0 ratio = 0 pts, 0.5+ ratio = full 25 pts
-    float score = bestRatio / 0.5f * 25.0f;
+    // Scale: 0.0 ratio = 0 pts, 0.65+ ratio = full 25 pts
+    float score = bestRatio / 0.65f * 25.0f;
     if (score > 25.0f) score = 25.0f;
     return score;
 }
 
 float TremorDetector::scorePeriodicity(const MotionFeatures& f) {
     // Max 25 points: normalized autocorrelation peak (0.0 to 1.0)
-    // Score scales linearly; a peak > 0.6 gets full marks
-    float score = f.normalizedAutocorrelationPeak / 0.6f * 25.0f;
+    // Experimental data showed tremors naturally achieve ~0.37 to ~0.43 Autocorr peak
+    float score = f.normalizedAutocorrelationPeak / 0.35f * 25.0f;
     if (score > 25.0f) score = 25.0f;
     if (score < 0.0f) score = 0.0f;
     return score;

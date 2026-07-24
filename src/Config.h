@@ -6,7 +6,8 @@
 // ==============================
 // Sampling Configurations
 // ==============================
-#define SAMPLE_COUNT 256
+#define SAMPLE_COUNT 512
+#define WINDOW_STEP_SAMPLES 64   // UI updates every 0.64s using the last 5.12s of data!
 #define SAMPLE_RATE 100          // Sampling rate in Hz
 #define SAMPLE_PERIOD_US (1000000UL / SAMPLE_RATE) // Timing in microseconds (10000us)
 

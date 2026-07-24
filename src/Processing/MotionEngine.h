@@ -109,6 +109,12 @@ private:
 
     // Internal calculation methods
     float calculateAutocorrelationPeak(const float* signal, uint16_t size, float& meanOut);
+
+    // Processing Buffers (moved from stack to class instance to prevent Stack Overflow)
+    float _gyroMag[SAMPLE_COUNT];
+    float _tempAxis[SAMPLE_COUNT];
+    float _accelMag[SAMPLE_COUNT];
+    float _acBuffer[SAMPLE_COUNT];
 };
 
 } // namespace Processing

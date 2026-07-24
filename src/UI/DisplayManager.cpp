@@ -2,198 +2,170 @@
 
 namespace UI {
 
+const uint16_t DisplayManager::GREEN_PALETTE[6]  = { 0x0320, 0x04A0, 0x05E0, 0x07E0, 0x05E0, 0x04A0 }; // ST77XX_GREEN = 0x07E0
+const uint16_t DisplayManager::YELLOW_PALETTE[6] = { 0x6300, 0xB500, 0xDEA0, 0xFFE0, 0xDEA0, 0xB500 }; // ST77XX_YELLOW = 0xFFE0
+const uint16_t DisplayManager::BLUE_PALETTE[6]   = { 0x0018, 0x01DF, 0x03FF, 0x001F, 0x03FF, 0x01DF }; // ST77XX_BLUE = 0x001F
+const uint16_t DisplayManager::RED_PALETTE[6]    = { 0x6000, 0x9000, 0xC000, 0xF800, 0xC000, 0x9000 }; // ST77XX_RED = 0xF800
+
 DisplayManager::DisplayManager()
     : _tft(TFT_CS, TFT_DC, TFT_RST),
       _initialized(false),
-      _lastState(CALIBRATING),
-      _needsFullRedraw(true) {}
+      _currentState(UIState::BOOT),
+      _lastState(UIState::BOOT),
+      _stateJustChanged(true),
+      _lastFrameTime(0),
+      _animFrame(0) {}
 
 void DisplayManager::begin() {
-    // Power on the TFT backlight
     pinMode(TFT_I2C_POWER, OUTPUT);
     digitalWrite(TFT_I2C_POWER, HIGH);
+    
+    pinMode(TFT_BACKLITE, OUTPUT);
+    digitalWrite(TFT_BACKLITE, HIGH);
+    
     delay(10);
 
     _tft.init(135, 240);
-    _tft.setRotation(3); // Landscape, USB on right
-    _tft.fillScreen(COLOR_BG);
-    _tft.setTextWrap(false);
+    _tft.setRotation(1);
+    _tft.fillScreen(0x0000);
     _initialized = true;
+
+    drawARCH();
 }
 
-void DisplayManager::showCalibration(uint32_t progress, uint32_t total) {
+void DisplayManager::update(UIState newState) {
     if (!_initialized) return;
 
-    if (_needsFullRedraw) {
-        _tft.fillScreen(COLOR_BG);
-        drawHeader("CALIBRATING", COLOR_CYAN);
-        _tft.setTextSize(1);
-        _tft.setTextColor(COLOR_TEXT);
-        _tft.setCursor(10, 50);
-        _tft.print("Keep hand still...");
-        _needsFullRedraw = false;
+    if (newState != _currentState) {
+        _lastState = _currentState;
+        _currentState = newState;
+        _stateJustChanged = true;
+        _animFrame = 0; // Reset animation on state change
+        _lastFrameTime = millis();
     }
 
-    // Progress bar
-    int barWidth = 200;
-    int barHeight = 14;
-    int barX = 20;
-    int barY = 80;
-    int filled = (int)((float)progress / total * barWidth);
-    if (filled > barWidth) filled = barWidth;
+    if (_stateJustChanged) {
+        _tft.fillScreen(0x0000);
+        _stateJustChanged = false;
 
-    _tft.drawRect(barX, barY, barWidth, barHeight, COLOR_DIM);
-    _tft.fillRect(barX + 1, barY + 1, filled - 2, barHeight - 2, COLOR_GREEN);
-}
-
-void DisplayManager::showMonitoring(const MotionFeatures& features,
-                                     const Detection::TremorResult& tremor,
-                                     const Detection::FallResult& fall,
-                                     MotionState state) {
-    if (!_initialized) return;
-
-    // Full redraw only on state transitions
-    if (state != _lastState || _needsFullRedraw) {
-        _tft.fillScreen(COLOR_BG);
-        _needsFullRedraw = false;
-        _lastState = state;
+        switch (_currentState) {
+            case UIState::NORMAL:   drawHeader("Normal"); break;
+            case UIState::TREMOR:   drawHeader("Tremor"); break;
+            case UIState::FREEZING: drawHeader("Freezing"); break;
+            case UIState::FALL:     drawHeader("Fall"); break;
+            default: break;
+        }
     }
 
-    // Header bar with state color
-    uint16_t stateColor;
-    const char* stateStr;
-    switch (state) {
-        case RESTING:             stateColor = COLOR_GREEN;  stateStr = "RESTING"; break;
-        case NORMAL_MOVEMENT:     stateColor = COLOR_CYAN;   stateStr = "MOVING"; break;
-        case REPETITIVE_MOVEMENT: stateColor = COLOR_YELLOW; stateStr = "REPETITIVE"; break;
-        default:                  stateColor = COLOR_DIM;    stateStr = "---"; break;
-    }
-    drawHeader(stateStr, stateColor);
+    // Animation speeds and radii from original design
+    const int animSpeeds[6] = {90, 70, 50, 70, 90, 110};
+    
+    if (millis() - _lastFrameTime > animSpeeds[_animFrame]) {
+        _lastFrameTime = millis();
+        
+        switch (_currentState) {
+            case UIState::NORMAL:   drawBreathingCircle(GREEN_PALETTE); break;
+            case UIState::TREMOR:   drawBreathingCircle(YELLOW_PALETTE); break;
+            case UIState::FREEZING: drawBreathingCircle(BLUE_PALETTE); break;
+            case UIState::FALL:     drawBreathingCircle(RED_PALETTE); break;
+            default: break;
+        }
 
-    // Tremor info
-    const char* sevStr;
-    uint16_t sevColor;
-    switch (tremor.severity) {
-        case Detection::TremorResult::MILD:     sevStr = "MILD";     sevColor = COLOR_YELLOW; break;
-        case Detection::TremorResult::MODERATE:  sevStr = "MODERATE"; sevColor = COLOR_ORANGE; break;
-        case Detection::TremorResult::SEVERE:    sevStr = "SEVERE";   sevColor = COLOR_RED; break;
-        default:                                 sevStr = "NONE";     sevColor = COLOR_GREEN; break;
-    }
-
-    drawLabelStr(25, "Tremor:", sevStr, sevColor);
-    drawLabelValue(40, "Confidence:", tremor.confidence, 0, COLOR_TEXT);
-    drawLabelValue(55, "Freq:", tremor.dominantFrequency, 1, COLOR_TEXT);
-
-    // Motion data
-    drawLabelValue(75, "Gyro RMS:", features.gyroRMS, 3, COLOR_CYAN);
-    drawLabelValue(90, "Accel:", features.accelerationRMS, 2, COLOR_CYAN);
-    drawLabelValue(105, "Autocorr:", features.normalizedAutocorrelationPeak, 2, COLOR_CYAN);
-
-    // Orientation
-    _tft.setTextSize(1);
-    _tft.setTextColor(COLOR_DIM, COLOR_BG);
-    _tft.setCursor(150, 75);
-    _tft.print("R:"); _tft.print(features.roll, 0); _tft.print("  ");
-    _tft.setCursor(150, 90);
-    _tft.print("P:"); _tft.print(features.pitch, 0); _tft.print("  ");
-
-    // Fall status
-    if (fall.fallSuspected) {
-        _tft.fillRect(0, 120, 240, 15, COLOR_RED);
-        _tft.setTextColor(COLOR_TEXT);
-        _tft.setCursor(10, 122);
-        _tft.print("!! FALL DETECTED !!");
+        _animFrame++;
+        if (_animFrame >= 6) _animFrame = 0;
     }
 }
 
-void DisplayManager::showFallWarning(const Detection::FallResult& fall) {
-    if (!_initialized) return;
-
-    _tft.fillScreen(COLOR_RED);
-    _tft.setTextSize(2);
-    _tft.setTextColor(COLOR_TEXT);
-    _tft.setCursor(20, 20);
-    _tft.print("FALL");
-    _tft.setCursor(20, 45);
-    _tft.print("SUSPECTED!");
-
-    _tft.setTextSize(1);
-    _tft.setCursor(20, 80);
-    _tft.print("Confidence: ");
-    _tft.print(fall.confidence, 0);
-    _tft.print("%");
-
-    _tft.setCursor(20, 110);
-    _tft.print("Remain still for help");
+void DisplayManager::drawARCH() {
+    _tft.fillScreen(0x0000);
+    _tft.setTextColor(0xFFFF);
+    _tft.setTextSize(3);
+    _tft.setCursor(80, 40);
+    _tft.print("ARCH");
 }
 
-void DisplayManager::showTapTest(uint16_t tapCount, bool active) {
-    if (!_initialized) return;
-
-    if (_needsFullRedraw) {
-        _tft.fillScreen(COLOR_BG);
-        drawHeader("TAP TEST", COLOR_CYAN);
-        _needsFullRedraw = false;
-    }
-
-    _tft.setTextSize(2);
-    _tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    _tft.setCursor(20, 50);
-    if (active) {
-        _tft.print("Taps: ");
-        _tft.print(tapCount);
-        _tft.print("   "); // Clear trailing digits
-    } else {
-        _tft.print("TAP NOW!  ");
-    }
-}
-
-void DisplayManager::showTapResults(const Detection::BradykinesiaResult& result) {
-    if (!_initialized) return;
-
-    _tft.fillScreen(COLOR_BG);
-    drawHeader("TAP RESULTS", COLOR_GREEN);
-
-    drawLabelValue(30, "Total Taps:", result.tapCount, 0, COLOR_TEXT);
-    drawLabelValue(50, "Avg Interval:", result.averageTapInterval, 2, COLOR_CYAN);
-    drawLabelValue(70, "Avg Amplitude:", result.averageAmplitude, 2, COLOR_CYAN);
-
-    uint16_t dropColor = (result.performanceDropRatio < 0.7f) ? COLOR_RED : COLOR_GREEN;
-    drawLabelValue(90, "Perf Drop:", result.performanceDropRatio, 2, dropColor);
-}
-
-// ==============================
-// Helper Drawing Functions
-// ==============================
-
-void DisplayManager::drawHeader(const char* title, uint16_t color) {
-    _tft.fillRect(0, 0, 240, 18, color);
-    _tft.setTextSize(1);
-    _tft.setTextColor(COLOR_BG);
-    _tft.setCursor(5, 5);
+void DisplayManager::drawHeader(const char* title) {
+    _tft.setTextColor(0xFFFF);
+    _tft.setTextSize(3);
+    
+    // Simple centering for standard titles
+    int16_t x1, y1;
+    uint16_t w, h;
+    _tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+    int cursorX = (240 - w) / 2;
+    
+    _tft.setCursor(cursorX, 20);
     _tft.print(title);
 }
 
-void DisplayManager::drawLabelValue(int y, const char* label, float value, int decimals, uint16_t color) {
-    _tft.setTextSize(1);
-    _tft.setTextColor(COLOR_DIM, COLOR_BG);
-    _tft.setCursor(5, y);
-    _tft.print(label);
-    _tft.setTextColor(color, COLOR_BG);
-    _tft.setCursor(90, y);
-    _tft.print(value, decimals);
-    _tft.print("     "); // Clear trailing chars
+void DisplayManager::drawBreathingCircle(const uint16_t colors[]) {
+    const int radius[6] = {20, 21, 22, 23, 22, 21};
+    int r = radius[_animFrame];
+    uint16_t color = colors[_animFrame];
+
+    // Erase the largest possible circle area (r=23+4=27) before drawing the new frame
+    _tft.fillCircle(CIRCLE_X, CIRCLE_Y, 28, 0x0000);
+
+    // Draw the new breathing frame
+    _tft.drawCircle(CIRCLE_X, CIRCLE_Y, r + 4, color);
+    _tft.drawCircle(CIRCLE_X, CIRCLE_Y, r + 2, color);
+    _tft.fillCircle(CIRCLE_X, CIRCLE_Y, r, color);
 }
 
-void DisplayManager::drawLabelStr(int y, const char* label, const char* value, uint16_t color) {
-    _tft.setTextSize(1);
-    _tft.setTextColor(COLOR_DIM, COLOR_BG);
-    _tft.setCursor(5, y);
-    _tft.print(label);
-    _tft.setTextColor(color, COLOR_BG);
-    _tft.setCursor(90, y);
-    _tft.print(value);
-    _tft.print("       "); // Clear trailing chars
+void DisplayManager::showMessage(const char* title, const char* subtitle) {
+    if (!_initialized) return;
+    
+    // Clear screen
+    _tft.fillScreen(0x0000);
+    
+    // Draw Title (centered, size 3)
+    _tft.setTextColor(0xFFFF);
+    _tft.setTextSize(3);
+    int16_t x1, y1;
+    uint16_t w, h;
+    _tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+    int cursorX = (240 - w) / 2;
+    _tft.setCursor(cursorX, 30);
+    _tft.print(title);
+    
+    // Draw Subtitle (centered, size 2)
+    if (subtitle != nullptr) {
+        _tft.setTextSize(2);
+        _tft.getTextBounds(subtitle, 0, 0, &x1, &y1, &w, &h);
+        cursorX = (240 - w) / 2;
+        _tft.setCursor(cursorX, 80);
+        _tft.print(subtitle);
+    }
+}
+
+void DisplayManager::updateDebug(const MotionFeatures& f, const Detection::TremorResult& tremor) {
+    if (!_initialized) return;
+
+    // Throttle updates to ~4Hz so it's readable and doesn't flicker
+    if (millis() - _lastFrameTime < 250) return;
+    _lastFrameTime = millis();
+
+    _tft.fillScreen(0x0000);
+    _tft.setCursor(0, 0);
+    _tft.setTextColor(0xFFFF);
+    _tft.setTextSize(2);
+    
+    _tft.println("--- DEBUG MODE ---");
+    _tft.println("");
+    _tft.printf("GyroRMS:  %.2f\n", f.gyroRMS);
+    _tft.printf("Energy:   %.2f\n", f.tremorBandEnergy[f.dominantAxis]);
+    _tft.printf("Autocorr: %.2f\n", f.normalizedAutocorrelationPeak);
+    _tft.println("------------------");
+    _tft.printf("Conf:     %.1f%%\n", tremor.confidence);
+    _tft.print("Status:   ");
+    
+    if (tremor.detected) {
+        _tft.setTextColor(0xFFE0); // Yellow
+        _tft.println("TREMOR");
+    } else {
+        _tft.setTextColor(0x07E0); // Green
+        _tft.println("NORMAL");
+    }
 }
 
 } // namespace UI

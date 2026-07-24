@@ -6,52 +6,57 @@
 #include <SPI.h>
 #include "../Processing/MotionEngine.h"
 #include "../Detection/TremorDetector.h"
-#include "../Detection/FallDetector.h"
-#include "../Detection/BradykinesiaDetector.h"
+#include "../Detection/TurnDetector.h"
 
 namespace UI {
+
+enum class UIState {
+    BOOT,
+    NORMAL,
+    TREMOR,
+    FREEZING,
+    FALL
+};
 
 class DisplayManager {
 public:
     DisplayManager();
 
     void begin();
-
-    // Primary monitoring screen
-    void showMonitoring(const MotionFeatures& features,
-                        const Detection::TremorResult& tremor,
-                        const Detection::FallResult& fall,
-                        MotionState state);
-
-    // Calibration screen
-    void showCalibration(uint32_t progress, uint32_t total);
-
-    // Fall warning screen
-    void showFallWarning(const Detection::FallResult& fall);
-
-    // Tap test screen
-    void showTapTest(uint16_t tapCount, bool active);
-    void showTapResults(const Detection::BradykinesiaResult& result);
+    
+    // Custom messaging
+    void showMessage(const char* title, const char* subtitle = nullptr);
+    
+    // Non-blocking update called every loop iteration
+    void update(UIState newState);
+    
+    // Debug view for raw metrics
+    void updateDebug(const MotionFeatures& f, const Detection::TremorResult& tremor);
 
 private:
     Adafruit_ST7789 _tft;
     bool _initialized;
-    MotionState _lastState;
-    bool _needsFullRedraw;
-
-    // Color palette
-    static const uint16_t COLOR_BG       = 0x0000; // Black
-    static const uint16_t COLOR_TEXT      = 0xFFFF; // White
-    static const uint16_t COLOR_GREEN    = 0x07E0;
-    static const uint16_t COLOR_RED      = 0xF800;
-    static const uint16_t COLOR_YELLOW   = 0xFFE0;
-    static const uint16_t COLOR_CYAN     = 0x07FF;
-    static const uint16_t COLOR_ORANGE   = 0xFD20;
-    static const uint16_t COLOR_DIM      = 0x7BEF; // Gray
     
-    void drawHeader(const char* title, uint16_t color);
-    void drawLabelValue(int y, const char* label, float value, int decimals, uint16_t color);
-    void drawLabelStr(int y, const char* label, const char* value, uint16_t color);
+    UIState _currentState;
+    UIState _lastState;
+    bool _stateJustChanged;
+
+    // Animation state
+    uint32_t _lastFrameTime;
+    int _animFrame;
+    
+    static const int CIRCLE_X = 120;
+    static const int CIRCLE_Y = 80;
+
+    // Color palettes
+    static const uint16_t GREEN_PALETTE[6];
+    static const uint16_t YELLOW_PALETTE[6];
+    static const uint16_t BLUE_PALETTE[6];
+    static const uint16_t RED_PALETTE[6];
+
+    void drawARCH();
+    void drawHeader(const char* title);
+    void drawBreathingCircle(const uint16_t colors[]);
 };
 
 } // namespace UI

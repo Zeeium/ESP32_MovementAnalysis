@@ -97,7 +97,6 @@ MotionFeatures MotionEngine::extract() {
     }
 
     // 1. Calculate Gyroscope Magnitude statistics
-    float gyroMag[SAMPLE_COUNT];
     float gyroMagSum = 0.0f;
     float gyroMagSqSum = 0.0f;
     f.gyroPeak = 0.0f;
@@ -108,7 +107,7 @@ MotionFeatures MotionEngine::extract() {
         float gz = _window.samples[i].gyroZ;
         
         float mag = sqrt(gx*gx + gy*gy + gz*gz);
-        gyroMag[i] = mag;
+        _gyroMag[i] = mag;
         gyroMagSum += mag;
         gyroMagSqSum += mag * mag;
         
@@ -122,29 +121,28 @@ MotionFeatures MotionEngine::extract() {
     
     float varSum = 0.0f;
     for (uint16_t i = 0; i < SAMPLE_COUNT; i++) {
-        float diff = gyroMag[i] - meanGyroMag;
+        float diff = _gyroMag[i] - meanGyroMag;
         varSum += diff * diff;
     }
     f.gyroVariance = varSum / SAMPLE_COUNT;
 
     // 2. Compute Periodicity (Normalized Autocorrelation Peak in 3-7 Hz band)
     float meanOut = 0.0f;
-    f.normalizedAutocorrelationPeak = calculateAutocorrelationPeak(gyroMag, SAMPLE_COUNT, meanOut);
+    f.normalizedAutocorrelationPeak = calculateAutocorrelationPeak(_gyroMag, SAMPLE_COUNT, meanOut);
 
     // 3. FFT Analysis on individual gyro axes
-    float tempAxis[SAMPLE_COUNT];
     
     // Gyro X FFT
-    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) tempAxis[i] = _window.samples[i].gyroX;
-    _fft.analyze(tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[0], f.dominantMagnitude[0], f.tremorBandEnergy[0]);
+    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) _tempAxis[i] = _window.samples[i].gyroX;
+    _fft.analyze(_tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[0], f.dominantMagnitude[0], f.tremorBandEnergy[0]);
 
     // Gyro Y FFT
-    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) tempAxis[i] = _window.samples[i].gyroY;
-    _fft.analyze(tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[1], f.dominantMagnitude[1], f.tremorBandEnergy[1]);
+    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) _tempAxis[i] = _window.samples[i].gyroY;
+    _fft.analyze(_tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[1], f.dominantMagnitude[1], f.tremorBandEnergy[1]);
 
     // Gyro Z FFT
-    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) tempAxis[i] = _window.samples[i].gyroZ;
-    _fft.analyze(tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[2], f.dominantMagnitude[2], f.tremorBandEnergy[2]);
+    for (uint16_t i = 0; i < SAMPLE_COUNT; i++) _tempAxis[i] = _window.samples[i].gyroZ;
+    _fft.analyze(_tempAxis, SAMPLE_COUNT, SAMPLE_RATE, f.dominantFrequency[2], f.dominantMagnitude[2], f.tremorBandEnergy[2]);
 
     // 4. Energy Distribution and Dominant Axis
     float energyX = 0.0f;
@@ -178,7 +176,6 @@ MotionFeatures MotionEngine::extract() {
 
     // 5. Acceleration statistics (g)
     float accelMagSqSum = 0.0f;
-    float accelMag[SAMPLE_COUNT];
     float accelMagSum = 0.0f;
 
     for (uint16_t i = 0; i < SAMPLE_COUNT; i++) {
@@ -188,7 +185,7 @@ MotionFeatures MotionEngine::extract() {
         
         // Acceleration magnitude in g
         float gMag = sqrt(ax*ax + ay*ay + az*az) / GRAVITY_MSS;
-        accelMag[i] = gMag;
+        _accelMag[i] = gMag;
         accelMagSum += gMag;
         accelMagSqSum += gMag * gMag;
     }
@@ -199,7 +196,7 @@ MotionFeatures MotionEngine::extract() {
     float meanAccelMag = accelMagSum / SAMPLE_COUNT;
     float linAccelVarSum = 0.0f;
     for (uint16_t i = 0; i < SAMPLE_COUNT; i++) {
-        float diff = accelMag[i] - meanAccelMag;
+        float diff = _accelMag[i] - meanAccelMag;
         linAccelVarSum += diff * diff;
     }
     f.linearAccelerationRMS = sqrt(linAccelVarSum / SAMPLE_COUNT);
@@ -213,14 +210,18 @@ MotionFeatures MotionEngine::extract() {
     // 7. Window properties
     f.duration = (_window.endTime - _window.startTime) / 1000.0f;
 
-    // Reset window buffer count
-    _window.count = 0;
+    // Shift window buffer to create a sliding window
+    int shiftAmount = SAMPLE_COUNT - WINDOW_STEP_SAMPLES;
+    memmove(&_window.samples[0], &_window.samples[WINDOW_STEP_SAMPLES], shiftAmount * sizeof(SensorSample));
+    _window.count = shiftAmount;
+    _window.startTime = _window.samples[0].timestamp;
 
     // 8. State Machine Transitions based on window features
-    if (f.gyroRMS < 0.10f) {
+    // Experimental Averages: Rest GyroRMS=0.21. Mild Tremor GyroRMS=0.83, Autocorr=0.39
+    if (f.gyroRMS < 0.40f) {
         _state = RESTING;
-    } else if (f.normalizedAutocorrelationPeak > 0.35f && f.gyroRMS > 0.15f) {
-        _state = REPETITIVE_MOVEMENT;
+    } else if (f.normalizedAutocorrelationPeak > 0.25f && f.gyroRMS > 0.50f) {
+        _state = REPETITIVE_MOVEMENT; // Tremor candidate
     } else {
         _state = NORMAL_MOVEMENT;
     }
@@ -238,27 +239,27 @@ float MotionEngine::calculateAutocorrelationPeak(const float* signal, uint16_t s
     meanOut = mean;
 
     // 2. Subtract mean to extract AC component
-    float ac[SAMPLE_COUNT];
     for (uint16_t i = 0; i < size; i++) {
-        ac[i] = signal[i] - mean;
+        _acBuffer[i] = signal[i] - mean;
     }
 
     // 3. Compute R(0) (variance * size)
     float r0 = 0.0f;
     for (uint16_t i = 0; i < size; i++) {
-        r0 += ac[i] * ac[i];
+        r0 += _acBuffer[i] * _acBuffer[i];
     }
 
     if (r0 <= 0.0f) {
         return 0.0f;
     }
 
-    // 4. Find peak in lag range [12, 50] (corresponding to ~2-8 Hz at 100Hz)
+    // 4. Find peak in lag range [12, 33] (corresponding to ~3-8 Hz at 100Hz)
+    // Lag 33 = 3.03 Hz, Lag 12 = 8.33 Hz. This inherently filters out 1-2Hz walking!
     float maxRN = -1.0f;
-    for (uint16_t k = 12; k <= 50; k++) {
+    for (uint16_t k = 12; k <= 33; k++) {
         float rk = 0.0f;
         for (uint16_t t = 0; t < size - k; t++) {
-            rk += ac[t] * ac[t + k];
+            rk += _acBuffer[t] * _acBuffer[t + k];
         }
         float rn = rk / r0;
         if (rn > maxRN) {
