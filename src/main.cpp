@@ -24,10 +24,10 @@ Data::Logger telemetryLogger;
 // ==============================
 // Adafruit IO Setup
 // ==============================
-#define IO_USERNAME  "Aerodynamic"
-#define IO_KEY       "aio_ybAZ04XdnPADgTlQS9UzSxfS6Q3G"
-#define WIFI_SSID    "DarrensPhone"
-#define WIFI_PASS    "ASDF1234"
+#define IO_USERNAME  
+#define IO_KEY       
+#define WIFI_SSID    
+#define WIFI_PASS    
 
 AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
 AdafruitIO_Feed *tremorLog = io.feed("tremor-log");
@@ -42,7 +42,7 @@ bool _wasFOG = false;
 // ==============================
 #include <WiFiClientSecure.h>
 
-const char* DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1529183469106630728/pmZB1b9pc034vfcY9z6yQhSg4QbG6wlc4JSY7xBUBwmgFiO5P9GOnH23-EqzQJ5Q7DRY";
+const char* DISCORD_WEBHOOK_URL = "";
 unsigned long lastImpactTime = 0;
 
 void sendDiscordWebhook(float gForce) {
